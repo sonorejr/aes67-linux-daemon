@@ -207,6 +207,13 @@ std::error_code DriverManager::ping() {
 std::error_code DriverManager::set_sample_rate(uint32_t sample_rate) {
   this->send_command(MT_ALSA_Msg_SetSampleRate, sizeof(uint32_t),
                      reinterpret_cast<const uint8_t*>(&sample_rate));
+  /* keep our own view in sync. sample_rate_ was only ever written on init and on the
+   * kernel's K2U SetSampleRate event, so after we pushed a rate down U2K,
+   * get_current_sample_rate() still reported the old one. Any caller comparing against it
+   * to decide whether a change is needed would therefore decide "yes" forever. */
+  if (!retcode_) {
+    sample_rate_ = sample_rate;
+  }
   return retcode_;
 }
 

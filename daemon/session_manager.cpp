@@ -1037,6 +1037,26 @@ std::error_code SessionManager::add_sink(const StreamSink& sink) {
     return DaemonErrc::stream_name_in_use;
   }
 
+  /* follow the stream's sample rate on the RECEIVE side.
+   * A sink's rate comes from the SDP (parse_sdp fills m_ui32SamplingRate), but nothing ever
+   * reconciled the RAVENNA card to it -- the card kept whatever daemon.conf set at startup.
+   * Subscribing to an 88.2k source while the card ran at 48k therefore fed the bridge
+   * capture at the wrong rate: audio played fast, with no error anywhere. The workaround
+   * was to restart the daemon with a matching sample_rate in daemon.conf, which costs a
+   * full re-discovery and re-lock. Push the rate down instead, the same way the send side
+   * follows the player (see worker()).
+   * NOTE: re-rating the card pulls it out from under anything already capturing on it, so
+   * the bridge (aes67-bridge.sh, driven by aes67-receiver.sh) must reopen after this --
+   * it already re-reads the rate when it restarts.
+   */
+  if (info.stream[0].m_ui32SamplingRate != 0 &&
+      info.stream[0].m_ui32SamplingRate != driver_->get_current_sample_rate()) {
+    BOOST_LOG_TRIVIAL(info)
+        << "session_manager:: sink " << std::to_string(sink.id) << " stream is "
+        << info.stream[0].m_ui32SamplingRate << " Hz but the card is at "
+        << driver_->get_current_sample_rate() << " Hz, following the stream";
+    (void)driver_->set_sample_rate(info.stream[0].m_ui32SamplingRate);
+  }
   auto ret = driver_->add_rtp_stream(info.stream[0], info.handle[0]);
   if (ret) {
     if (it != sinks_.end()) {
