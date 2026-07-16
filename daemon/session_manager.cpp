@@ -1438,6 +1438,31 @@ bool SessionManager::worker() {
       ptp_interval = 10;
     }
 
+    /* follow the player's sample rate in ~1s instead of up to 10s.
+     * The driver reports the rate the player opened on the ALSA card via the K2U
+     * MT_ALSA_Msg_SetSampleRate event, and DriverManager::on_event updates
+     * get_current_sample_rate() the moment it arrives. Upstream reconciles that only
+     * inside the PTP block above, which self-throttles to ptp_interval = 10 after its
+     * first pass, so a rate change waits for the next PTP tick before the driver is told
+     * and the sources are re-announced. That is the "the hardware takes much longer to
+     * lock the new rate, sometimes 8 seconds" report: a software receiver reacting to
+     * the event looks instant next to a 0-10s poll wait. It also leaves the driver
+     * blocked in mr_alsa_audio_pcm_prepare(), which busy-waits up to 4s for PTP to
+     * re-lock after it sends the event (manager.c: set_sample_rate).
+     * This loop already ticks every second, so checking here costs one comparison per
+     * tick and bounds the follow at ~1s. Placed before the SAP block so the
+     * announcement in this same tick already carries the new SDP. The PTP block's own
+     * check stays for the gmid case and simply finds nothing left to do.
+     */
+    if (sample_rate != driver_->get_current_sample_rate()) {
+      sample_rate = driver_->get_current_sample_rate();
+      BOOST_LOG_TRIVIAL(info)
+          << "session_manager:: sample rate changed to " << sample_rate
+          << ", updating driver and sources";
+      (void)driver_->set_sample_rate(sample_rate);
+      on_update_sources();
+    }
+
     // check if it's time to send sap announcements
     if ((duration_cast<second_t>(steady_clock::now() - sap_timepoint).count()) >
         sap_interval) {
