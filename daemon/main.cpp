@@ -66,7 +66,9 @@ int main(int argc, char* argv[]) {
   desc.add_options()("version,v", "Print daemon version and exit")(
       "config,c", po::value<std::string>()->default_value("/etc/daemon.conf"),
       "daemon configuration file")("http_addr,a", po::value<std::string>(),
-                                   "HTTP server addr")(
+                                   "HTTP server addr (default 127.0.0.1; the "
+                                   "API is unauthenticated -- use 0.0.0.0 only "
+                                   "behind auth/a firewall)")(
       "http_port,p", po::value<int>(), "HTTP server port")("help,h",
                                                            "Print this help "
                                                            "message");

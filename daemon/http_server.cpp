@@ -471,7 +471,22 @@ bool HttpServer::init() {
 
   std::string http_addr = config_->get_http_addr_str();
   if (http_addr.empty())
-    http_addr = "0.0.0.0";
+    /* Bind LOOPBACK by default, not 0.0.0.0.
+     *
+     * This control API has no authentication (see README) and sends a permissive
+     * CORS header, so a default of "every interface" is not a safe posture for an
+     * appliance -- the API should not be reachable off-box unless someone asks for
+     * that deliberately and puts access control in front of it.
+     *
+     * This also matches the documented behaviour: README already tells users to
+     * pass `-a 0.0.0.0` to bind all local network interfaces, which only makes
+     * sense if the default is NOT all interfaces.
+     *
+     * Deliberately still CLI-only: http_addr is not parsed from daemon.conf, so it
+     * cannot be changed through the HTTP config endpoint. Please keep it that way --
+     * otherwise a caller could rebind the socket and undo this.
+     */
+    http_addr = "127.0.0.1";
   BOOST_LOG_TRIVIAL(info) << "http_server:: binding to " << http_addr << ":"
                           << config_->get_http_port();
 
