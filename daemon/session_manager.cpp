@@ -1237,11 +1237,37 @@ size_t SessionManager::process_sap() {
     }
   }
 
+  // Set of source ids that are still live, independent of their SDP content. msg_id_hash is
+  // (id << 16) + crc16(sdp), so ANY change to a source's SDP -- a sample-rate follow, a codec
+  // switch, a channel-count change -- produces a new hash for the SAME source. Comparing hashes
+  // alone therefore made an updated source look like a removed one, and we announced a SAP
+  // DELETION for a stream that was still running.
+  //
+  // Receivers key on the SAP identity (bondagit's browser tracks "sap:<addr>-<msg_id_hash>"), so
+  // that deletion tells them the source is gone. Measured end to end: on a 48k -> 88.2k change the
+  // sender emitted deletion+announcement, the receiver logged "removing SAP source sap:..." and
+  // dropped it, its sink was left orphaned (receiving=false), and the bridge stopped ~9s later --
+  // silence, with both ends otherwise reporting healthy.
+  //
+  // A changed SDP for a live session is an UPDATE, not a removal: the announcement below already
+  // carries a bumped session_version in the SDP o= line, which is exactly how RFC 4566 signals a
+  // revision of the same session. So only send a deletion once the source id itself is gone.
+  std::set<uint16_t> active_ids;
+  for (auto const& h : active_sources) {
+    active_ids.insert(static_cast<uint16_t>(h >> 16));
+  }
+
   // check for sources that are no longer announced and send deletion/s
   for (auto const& [msg_id_hash, info] : announced_sources_) {
     auto src_addr = std::get<0>(info);
     auto session_id = std::get<1>(info);
     auto session_version = std::get<2>(info);
+    // Stale hash for a source that is still live -> it was re-announced under a new hash. Do not
+    // advertise a deletion; just let the entry age out of announced_sources_ below.
+    if (active_ids.find(static_cast<uint16_t>(msg_id_hash >> 16)) != active_ids.end()) {
+      deleted_sources_count_[msg_id_hash] = SAP::max_deletions;
+      continue;
+    }
     // check if this source is no longer announced
     if (active_sources.find(msg_id_hash) == active_sources.end()) {
       // retrieve deleted source SDP
